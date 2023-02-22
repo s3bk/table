@@ -1,7 +1,11 @@
+#[cfg(feature="datasize")]
 use datasize::DataSize;
-use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Debug, DataSize, Serialize, Deserialize)]
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature="datasize", derive(DataSize))]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature="rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum Cell<T> {
     Empty,
     Occupied { value: T, colspan: u32, rowspan: u32 },
@@ -23,7 +27,10 @@ impl std::error::Error for Error {
 
 }
 
-#[derive(Clone, Debug, DataSize, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature="datasize", derive(DataSize))]
+#[cfg_attr(feature="serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature="rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct Table<T> {
     num_cols: u32,
     num_rows: u32,
