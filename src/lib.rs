@@ -1,6 +1,7 @@
 #[cfg(feature="datasize")]
 use datasize::DataSize;
 
+use log::{error, debug};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature="datasize", derive(DataSize))]
@@ -63,40 +64,45 @@ impl<T> Table<T> {
                 self.cells.extend(std::iter::from_fn(|| Some(Cell::Empty)).take(cols as usize - self.num_cols as usize));
             }
             self.num_cols = cols;
+            
+            assert_eq!(self.num_cols as usize * self.num_rows as usize, self.cells.len());
         }
-        if rows >= self.num_rows {
+        if rows > self.num_rows {
             self.cells.extend(std::iter::from_fn(|| Some(Cell::Empty)).take((rows - self.num_rows) as usize * self.num_cols as usize));
+            self.num_rows = rows;
+
+            assert_eq!(self.num_cols as usize * self.num_rows as usize, self.cells.len());
         }
         let new_cell = Cell::Occupied { value, colspan, rowspan };
-        let old_cell = replace(&mut self[(row, col)], new_cell);
+        let old_cell = self.replace(row, col, new_cell);
         match old_cell {
             Cell::Occupied { value: cell_value, colspan: old_colspan, rowspan: old_rowspan } => {
                 for r in row + 1 .. row + old_rowspan {
-                    self[(r, col)] = Cell::Empty;
+                    self.set(r, col, Cell::Empty);
                 }
                 for c in col + 1 .. col + old_colspan {
                     for r in row .. row + old_rowspan {
-                        self[(r, c)] = Cell::Empty;
+                        self.set(r, c, Cell::Empty);
                     }
                 }
 
                 for r in row + 1 .. row + rowspan {
-                    self[(r, col)] = Cell::Shadowed { col, row };
+                    self.set(r, col, Cell::Shadowed { col, row });
                 }
                 for c in col .. col + colspan {
                     for r in row .. row + rowspan {
-                        self[(r, c)] = Cell::Shadowed { col, row };
+                        self.set(r, c, Cell::Shadowed { col, row });
                     }
                 }
                 Ok(Some(cell_value))
             }
             Cell::Empty => {
                 for r in row + 1 .. row + rowspan {
-                    self[(r, col)] = Cell::Shadowed { col, row };
+                    self.set(r, col, Cell::Shadowed { col, row });
                 }
-                for c in col .. col + colspan {
+                for c in col + 1 .. col + colspan {
                     for r in row .. row + rowspan {
-                        self[(r, c)] = Cell::Shadowed { col, row };
+                        self.set(r, c, Cell::Shadowed { col, row });
                     }
                 }
                 Ok(None)
@@ -104,13 +110,51 @@ impl<T> Table<T> {
             Cell::Shadowed { col, row } => Err(Error::Shadowed { col, row }),
         }
     }
+    #[inline]
+    fn cell_index(&self, row: u32, col: u32) -> usize {
+        self.num_cols as usize * row as usize + col as usize
+    }
+    #[inline]
+    fn set(&mut self, row: u32, col: u32, value: Cell<T>) {
+        let index = self.cell_index(row, col);
+        if let Some(cell) = self.cells.get_mut(index) {
+            *cell = value;
+        } else {
+            panic!("cell row={row}, col={col} out of bounds");
+        }
+    }
+    #[inline]
+    fn replace(&mut self, row: u32, col: u32, value: Cell<T>) -> Cell<T> {
+        let index = self.cell_index(row, col);
+        if let Some(cell) = self.cells.get_mut(index) {
+            replace(cell, value)
+        } else {
+            panic!("cell row={row}, col={col} out of bounds");
+        }
+    }
     pub fn get_cell_value_mut(&mut self, row: u32, col: u32) -> Option<&mut T> {
-        match self[(row, col)] {
-            Cell::Occupied { ref mut value, .. } => Some(value),
-            _ => None
+        let idx = self.cell_index(row, col);
+        match self.cells.get_mut(idx) {
+            Some(&mut Cell::Occupied { ref mut value, .. }) => Some(value),
+            Some(&mut Cell::Shadowed { col, row }) => {
+                debug!("shadowed cell at row={row}, col={col}");
+                None
+            }
+            Some(&mut Cell::Empty) => {
+                debug!("no data at row={row}, col={col}");
+                None
+            }
+            None => {
+                debug!("out of bounds row={row}, col={col}");
+                None
+            }
         }
     }
     pub fn format_html<W: fmt::Write>(&self, w: &mut W, format_cell: impl Fn(&mut W, &T) -> fmt::Result) -> fmt::Result {
+        assert_eq!(self.num_cols as usize * self.num_rows as usize, self.cells.len());
+        if self.num_cols == 0 || self.num_rows == 0 {
+            return Ok(());
+        }
         writeln!(w, "<table>")?;
         writeln!(w, "<tbody>")?;
         for row in self.cells.chunks_exact(self.num_cols as usize) {
@@ -194,15 +238,4 @@ pub struct CellValue<'a, T> {
     pub row: u32,
     pub colspan: u32,
     pub rowspan: u32,
-}
-impl<T> Index<(u32, u32)> for Table<T> {
-    type Output = Cell<T>;
-    fn index(&self, (row, col): (u32, u32)) -> &Self::Output {
-        &self.cells[self.num_cols as usize * row as usize + col as usize]
-    }
-}
-impl<T> IndexMut<(u32, u32)> for Table<T> {
-    fn index_mut(&mut self, (row, col): (u32, u32)) -> &mut Self::Output {
-        &mut self.cells[self.num_cols as usize * row as usize + col as usize]
-    }
 }

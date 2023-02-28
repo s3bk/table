@@ -9,3 +9,4 @@ edition = "2021"
 datasize = { version = "0.2.13", optional = true }
 serde = { version = "*", features = ["derive"], optional = true }
 rkyv = { version = "*", default-features = false, optional = true }
+log = "*"
